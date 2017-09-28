@@ -35,12 +35,11 @@ if (!$gatewayParams['type']) {
 
 // Retrieve data returned in payment gateway callback
 // Varies per payment gateway
-$success = $_POST["x_status"];
-$invoiceId = $_POST["x_invoice_id"];
-$transactionId = $_POST["x_trans_id"];
-$paymentAmount = $_POST["x_amount"];
-$paymentFee = $_POST["x_fee"];
-$hash = $_POST["x_hash"];
+$status = $_POST["status"];
+$invoiceId = $_POST["reference"];
+$transactionId =  $_POST["reference"];
+$paymentAmount = $_POST["amount"];
+$hash = $_POST["hash"];
 
 $transactionStatus = $success ? 'Success' : 'Failure';
 
@@ -96,9 +95,9 @@ checkCbTransID($transactionId);
  * @param string|array $debugData    Data to log
  * @param string $transactionStatus  Status
  */
-logTransaction($gatewayParams['name'], $_POST, $transactionStatus);
+logTransaction($gatewayParams['name'], $_POST, $status);
 
-if ($success) {
+//if ($success) {
 
     /**
      * Add Invoice Payment.
@@ -115,8 +114,70 @@ if ($success) {
         $invoiceId,
         $transactionId,
         $paymentAmount,
-        $paymentFee,
         $gatewayModuleName
     );
 
+//}
+
+
+
+// Ater payment on paypal
+function completePayment() {
+    global $integration_id;
+    global $integration_key;
+    global $checkout_url;
+    global $orders_data_file;
+
+    $request->reference = $_GET['order_id'];
+
+    //Lets get our locally saved settings for this order
+    $orders_array = array();
+    if (file_exists($orders_data_file)) {
+        $orders_array = parse_ini_file($orders_data_file, true);
+    }
+
+    $order_data = $orders_array['OrderNo_' . $request->reference];
+
+    $ch = curl_init();
+
+    //set the url, number of POST vars, POST data
+    curl_setopt($ch, CURLOPT_URL, $order_data['pollurl']);
+    curl_setopt($ch, CURLOPT_POST, 0);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, '');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+    //execute post
+    $result = curl_exec($ch);
+
+    if ($result) {
+
+        //close connection
+        $msg = ParseMsg($result);
+
+        $MerchantKey = $integration_key;
+        $validateHash = CreateHash($msg, $MerchantKey);
+
+        if ($validateHash != $msg["hash"]) {
+            header("Location: $checkout_url");
+        } else {
+            /*             * *** IMPORTANT ****
+              On Paynow, payment status has changed, say from Awaiting Delivery to Delivered
+
+              Here is where you
+              1. Update your local shopping cart of Payment Status etc and do appropriate actions here, Save data to DB
+              2. Email, SMS Notifications to customer, merchant etc
+              3. Any other thing
+
+             * ** END OF IMPORTANT *** */
+            //1. Lets write the updated settings
+            $orders_array['OrderNo_' . $request->reference] = $msg;
+            $orders_array['OrderNo_' . $request->reference]['returned_from_paynow'] = 'yes';
+
+            write_ini_file($orders_array, $orders_data_file, true);
+        }
+    }
+
+    //Thank	your customer
+    // getBackFromPaynowHTML();
 }

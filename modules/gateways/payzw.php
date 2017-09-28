@@ -1,4 +1,5 @@
 <?php
+
 /**
  * WHMCS Sample Payment Gateway Module
  *
@@ -10,8 +11,8 @@
  *
  * Within the module itself, all functions must be prefixed with the module
  * filename, followed by an underscore, and then the function name. For this
- * example file, the filename is "gatewaymodule" and therefore all functions
- * begin "gatewaymodule_".
+ * example file, the filename is "payzw" and therefore all functions
+ * begin "payzw_".
  *
  * If your module or third party API does not support a given function, you
  * should not define that function within your module. Only the _config
@@ -24,10 +25,13 @@
  * @copyright Copyright (c) WHMCS Limited 2017
  * @license http://www.whmcs.com/license/ WHMCS Eula
  */
-
 if (!defined("WHMCS")) {
     die("This file cannot be accessed directly");
 }
+
+use WHMCS\Database\Capsule;
+
+require_once 'payzw/functions.php';
 
 /**
  * Define module related meta data.
@@ -39,10 +43,9 @@ if (!defined("WHMCS")) {
  *
  * @return array
  */
-function gatewaymodule_MetaData()
-{
+function payzw_MetaData() {
     return array(
-        'DisplayName' => 'Sample Payment Gateway Module',
+        'DisplayName' => 'Payzw',
         'APIVersion' => '1.1', // Use API Version 1.1
         'DisableLocalCredtCardInput' => true,
         'TokenisedStorage' => false,
@@ -69,14 +72,13 @@ function gatewaymodule_MetaData()
  *
  * @return array
  */
-function gatewaymodule_config()
-{
+function payzw_config() {
     return array(
         // the friendly display name for a payment gateway should be
         // defined here for backwards compatibility
         'FriendlyName' => array(
             'Type' => 'System',
-            'Value' => 'Sample Third Party Payment Gateway Module',
+            'Value' => 'Payzw',
         ),
         // a text field type allows for single line text input
         'accountID' => array(
@@ -99,33 +101,7 @@ function gatewaymodule_config()
             'FriendlyName' => 'Test Mode',
             'Type' => 'yesno',
             'Description' => 'Tick to enable test mode',
-        ),
-        // the dropdown field type renders a select menu of options
-        'dropdownField' => array(
-            'FriendlyName' => 'Dropdown Field',
-            'Type' => 'dropdown',
-            'Options' => array(
-                'option1' => 'Display Value 1',
-                'option2' => 'Second Option',
-                'option3' => 'Another Option',
-            ),
-            'Description' => 'Choose one',
-        ),
-        // the radio field type displays a series of radio button options
-        'radioField' => array(
-            'FriendlyName' => 'Radio Field',
-            'Type' => 'radio',
-            'Options' => 'First Option,Second Option,Third Option',
-            'Description' => 'Choose your option!',
-        ),
-        // the textarea field type allows for multi-line text input
-        'textareaField' => array(
-            'FriendlyName' => 'Textarea Field',
-            'Type' => 'textarea',
-            'Rows' => '3',
-            'Cols' => '60',
-            'Description' => 'Freeform multi-line text input field',
-        ),
+        )
     );
 }
 
@@ -143,16 +119,14 @@ function gatewaymodule_config()
  *
  * @return string
  */
-function gatewaymodule_link($params)
-{
+function payzw_link($params) {
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
     $testMode = $params['testMode'];
-    $dropdownField = $params['dropdownField'];
-    $radioField = $params['radioField'];
-    $textareaField = $params['textareaField'];
-
+//    $dropdownField = $params['dropdownField'];
+//    $radioField = $params['radioField'];
+//    $textareaField = $params['textareaField'];
     // Invoice Parameters
     $invoiceId = $params['invoiceid'];
     $description = $params["description"];
@@ -174,38 +148,29 @@ function gatewaymodule_link($params)
     // System Parameters
     $companyName = $params['companyname'];
     $systemUrl = $params['systemurl'];
+    $moduleName = $params['paymentmethod'];
     $returnUrl = $params['returnurl'];
+    $completeUrl = $systemUrl . 'modules/gateways/payzw/complete.php?id=' . $invoiceId;
+    $resultUrl = $systemUrl . 'modules/gateways/callback/' . $moduleName . '.php';
     $langPayNow = $params['langpaynow'];
     $moduleDisplayName = $params['name'];
     $moduleName = $params['paymentmethod'];
     $whmcsVersion = $params['whmcsVersion'];
+    /**
+     * Do cURL request to paynow then process payment
+     */
+    $checkoutUrl = paynow($accountId, $secretKey, $amount, $invoiceId, $email, $completeUrl, $resultUrl, $returnUrl);
 
-    $url = 'https://www.demopaymentgateway.com/do.payment';
+    /**
+     * Clean up checkout url
+     */
+    $paymentLink = explode('-', $checkoutUrl)[0];
 
-    $postfields = array();
-    $postfields['username'] = $username;
-    $postfields['invoice_id'] = $invoiceId;
-    $postfields['description'] = $description;
-    $postfields['amount'] = $amount;
-    $postfields['currency'] = $currencyCode;
-    $postfields['first_name'] = $firstname;
-    $postfields['last_name'] = $lastname;
-    $postfields['email'] = $email;
-    $postfields['address1'] = $address1;
-    $postfields['address2'] = $address2;
-    $postfields['city'] = $city;
-    $postfields['state'] = $state;
-    $postfields['postcode'] = $postcode;
-    $postfields['country'] = $country;
-    $postfields['phone'] = $phone;
-    $postfields['callback_url'] = $systemUrl . '/modules/gateways/callback/' . $moduleName . '.php';
-    $postfields['return_url'] = $returnUrl;
 
-    $htmlOutput = '<form method="post" action="' . $url . '">';
-    foreach ($postfields as $k => $v) {
-        $htmlOutput .= '<input type="hidden" name="' . $k . '" value="' . urlencode($v) . '" />';
-    }
-    $htmlOutput .= '<input type="submit" value="' . $langPayNow . '" />';
+
+
+    $htmlOutput = '<form method="get" action="' . $paymentLink . '">';
+    $htmlOutput .= '<input name="pay" type="submit" value="' . $langPayNow . '" />';
     $htmlOutput .= '</form>';
 
     return $htmlOutput;
@@ -222,16 +187,14 @@ function gatewaymodule_link($params)
  *
  * @return array Transaction response status
  */
-function gatewaymodule_refund($params)
-{
+function payzw_refund($params) {
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
     $testMode = $params['testMode'];
-    $dropdownField = $params['dropdownField'];
-    $radioField = $params['radioField'];
-    $textareaField = $params['textareaField'];
-
+//    $dropdownField = $params['dropdownField'];
+//    $radioField = $params['radioField'];
+//    $textareaField = $params['textareaField'];
     // Transaction Parameters
     $transactionIdToRefund = $params['transid'];
     $refundAmount = $params['amount'];
@@ -284,8 +247,7 @@ function gatewaymodule_refund($params)
  *
  * @return array Transaction response status
  */
-function gatewaymodule_cancelSubscription($params)
-{
+function payzw_cancelSubscription($params) {
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
@@ -313,4 +275,117 @@ function gatewaymodule_cancelSubscription($params)
         // Data to be recorded in the gateway log - can be a string or array
         'rawdata' => $responseData,
     );
+}
+
+/**
+ * Paynow functions
+ */
+function paynow($id, $secretKey, $amount, $invoiceId, $email, $completeUrl, $resultUrl, $returnUrl) {
+    /*     * *******************************************
+      1. Define Constants
+     * ******************************************* */
+    define('ps_error', 'Error');
+    define('ps_ok', 'Ok');
+    define('ps_created_but_not_paid', 'created but not paid');
+    define('ps_cancelled', 'cancelled');
+    define('ps_failed', 'failed');
+    define('ps_paid', 'paid');
+    define('ps_awaiting_delivery', 'awaiting delivery');
+    define('ps_delivered', 'delivered');
+    define('ps_awaiting_redirect', 'awaiting redirect');
+    define('site_url', $_SERVER['REQUEST_URI']);
+
+    /*     * *******************************************
+      2. sitewide variables, settings
+     * ******************************************* */
+    $integration_id = $id;
+    $integration_key = $secretKey; //oops this MUST BE SECRET, take it from a Database, encrypted or something
+    $initiate_transaction_url = 'https://www.paynow.co.zw/Interface/InitiateTransaction';
+    $orders_data_file = 'payzw/ordersdata.ini';
+
+
+    //set POST variables
+    $values = array(
+        'resulturl' => $resultUrl,
+        'returnurl' => $completeUrl, //payzw return url
+        'reference' => $invoiceId,
+        'amount' => $amount,
+        'id' => $integration_id,
+        'additionalinfo' => "Payment for invoice Number : " . $invoiceId,
+        'authemail' => $email,
+        'status' => 'Message'); //just a simple message
+
+    $fields_string = CreateMsg($values, $integration_key);
+
+    //open connection
+    $ch = curl_init();
+
+    curl_setopt($ch, CURLOPT_URL, $initiate_transaction_url);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $fields_string);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+
+    //execute post
+    $result = curl_exec($ch);
+
+    if ($result) {
+        $msg = ParseMsg($result);
+
+        //first check status, take appropriate action
+        if ($msg["status"] == ps_error) {
+            $error = $msg['error'];
+        } else if ($msg["status"] == ps_ok) {
+
+            //second, check hash
+            $validateHash = CreateHash($msg, $integration_key);
+            if ($validateHash != $msg["hash"]) {
+                $error = "Paynow reply hashes do not match : " . $validateHash . " - " . $msg["hash"];
+            } else {
+                $theProcessUrl = $msg["browserurl"];
+                /**
+                 * Record transaction
+                 */
+                $pdo = Capsule::connection()->getPdo();
+                $pdo->beginTransaction();
+
+                try {
+                    $statement = $pdo->prepare(
+                            'insert into tblpayzw (invoice_id, return_url, data) values (:invoice_id, :return_url, :data)'
+                    );
+
+                    $statement->execute(
+                            [
+                                ':invoice_id' => $invoiceId,
+                                ':return_url' => $returnUrl, //System return url
+                                ':data' => $result,
+                            ]
+                    );
+
+                    $pdo->commit();
+                } catch (\Exception $e) {
+                    echo "Uh oh! {$e->getMessage()}";
+                    
+                    $pdo->rollBack();
+                }
+            }
+        } else {
+            //unknown status or one you dont want to handle locally
+            $error = "Invalid status in from Paynow, cannot continue.";
+        }
+    } else {
+        $error = curl_error($ch);
+    }
+
+    //close connection
+    curl_close($ch);
+
+
+    //Choose where to go
+    if (isset($error)) {
+        echo $error;
+        exit;
+    } else {
+        return $theProcessUrl;
+    }
+    exit;
 }
