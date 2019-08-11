@@ -43,7 +43,8 @@ require_once 'payzw/functions.php';
  *
  * @return array
  */
-function payzw_MetaData() {
+function payzw_MetaData()
+{
     return array(
         'DisplayName' => 'Payzw',
         'APIVersion' => '1.1', // Use API Version 1.1
@@ -72,7 +73,8 @@ function payzw_MetaData() {
  *
  * @return array
  */
-function payzw_config() {
+function payzw_config()
+{
     return array(
         // the friendly display name for a payment gateway should be
         // defined here for backwards compatibility
@@ -119,7 +121,8 @@ function payzw_config() {
  *
  * @return string
  */
-function payzw_link($params) {
+function payzw_link($params)
+{
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
@@ -150,16 +153,17 @@ function payzw_link($params) {
     $systemUrl = $params['systemurl'];
     $moduleName = $params['paymentmethod'];
     $returnUrl = $params['returnurl'];
-    $completeUrl = $systemUrl . 'modules/gateways/payzw/complete.php?id=' . $invoiceId;
+    // $completeUrl = $systemUrl . 'modules/gateways/payzw/complete.php?id=' . $invoiceId;
     $resultUrl = $systemUrl . 'modules/gateways/callback/' . $moduleName . '.php';
     $langPayNow = $params['langpaynow'];
     $moduleDisplayName = $params['name'];
-    $moduleName = $params['paymentmethod'];
     $whmcsVersion = $params['whmcsVersion'];
     /**
      * Do cURL request to paynow then process payment
      */
-    $checkoutUrl = paynow($accountId, $secretKey, $amount, $invoiceId, $email, $completeUrl, $resultUrl, $returnUrl);
+
+    // die($resultUrl);
+    $checkoutUrl = paynow($accountId, $secretKey, $amount, $invoiceId, $email, $resultUrl, $returnUrl);
 
     /**
      * Clean up checkout url
@@ -187,7 +191,8 @@ function payzw_link($params) {
  *
  * @return array Transaction response status
  */
-function payzw_refund($params) {
+function payzw_refund($params)
+{
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
@@ -247,7 +252,8 @@ function payzw_refund($params) {
  *
  * @return array Transaction response status
  */
-function payzw_cancelSubscription($params) {
+function payzw_cancelSubscription($params)
+{
     // Gateway Configuration Parameters
     $accountId = $params['accountID'];
     $secretKey = $params['secretKey'];
@@ -280,7 +286,8 @@ function payzw_cancelSubscription($params) {
 /**
  * Paynow functions
  */
-function paynow($id, $secretKey, $amount, $invoiceId, $email, $completeUrl, $resultUrl, $returnUrl) {
+function paynow($id, $secretKey, $amount, $invoiceId, $email, $resultUrl, $returnUrl)
+{
     /*     * *******************************************
       1. Define Constants
      * ******************************************* */
@@ -301,13 +308,13 @@ function paynow($id, $secretKey, $amount, $invoiceId, $email, $completeUrl, $res
     $integration_id = $id;
     $integration_key = $secretKey; //oops this MUST BE SECRET, take it from a Database, encrypted or something
     $initiate_transaction_url = 'https://www.paynow.co.zw/Interface/InitiateTransaction';
-    $orders_data_file = 'payzw/ordersdata.ini';
+    // $orders_data_file = 'payzw/ordersdata.ini';
 
 
     //set POST variables
     $values = array(
         'resulturl' => $resultUrl,
-        'returnurl' => $completeUrl, //payzw return url
+        'returnurl' => $returnUrl, //payzw return url
         'reference' => $invoiceId,
         'amount' => $amount,
         'id' => $integration_id,
@@ -334,8 +341,7 @@ function paynow($id, $secretKey, $amount, $invoiceId, $email, $completeUrl, $res
         //first check status, take appropriate action
         if ($msg["status"] == ps_error) {
             $error = $msg['error'];
-        } else if ($msg["status"] == ps_ok) {
-
+        } elseif ($msg["status"] == ps_ok) {
             //second, check hash
             $validateHash = CreateHash($msg, $integration_key);
             if ($validateHash != $msg["hash"]) {
@@ -349,18 +355,25 @@ function paynow($id, $secretKey, $amount, $invoiceId, $email, $completeUrl, $res
                 $pdo->beginTransaction();
 
                 try {
-                    $statement = $pdo->prepare(
-                            'insert into tblpayzw (invoice_id, return_url, data) values (:invoice_id, :return_url, :data)'
+                    // chcek if transaction does not already exist
+                    $payzw_trn =  Capsule::table('tblpayzw')
+                                ->where('status', 'pending_payment')
+                                ->where('invoice_id', $invoiceId)
+                                ->first();
+                    if( is_null($payzw_trn) ) {
+                        $statement = $pdo->prepare(
+                        'insert into tblpayzw (invoice_id, return_url, data, poll_url) values (:invoice_id, :return_url, :data, :poll_url)'
                     );
 
                     $statement->execute(
-                            [
+                        [
                                 ':invoice_id' => $invoiceId,
                                 ':return_url' => $returnUrl, //System return url
                                 ':data' => $result,
+                                ':poll_url' => $msg['pollurl']
                             ]
                     );
-
+                    }
                     $pdo->commit();
                 } catch (\Exception $e) {
                     echo "Uh oh! {$e->getMessage()}";

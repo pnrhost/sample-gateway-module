@@ -16,11 +16,13 @@
  * @copyright Copyright (c) WHMCS Limited 2017
  * @license http://www.whmcs.com/license/ WHMCS Eula
  */
+use WHMCS\Database\Capsule;
 
 // Require libraries needed for gateway module functions.
 require_once __DIR__ . '/../../../init.php';
 require_once __DIR__ . '/../../../includes/gatewayfunctions.php';
 require_once __DIR__ . '/../../../includes/invoicefunctions.php';
+require_once __DIR__ . '/../payzw/functions.php';
 
 // Detect module name from filename.
 $gatewayModuleName = basename(__FILE__, '.php');
@@ -37,11 +39,10 @@ if (!$gatewayParams['type']) {
 // Varies per payment gateway
 $status = $_POST["status"];
 $invoiceId = $_POST["reference"];
-$transactionId =  $_POST["reference"];
-$paymentAmount = $_POST["amount"];
+// $paymentAmount = $_POST["amount"];
 $hash = $_POST["hash"];
 
-$transactionStatus = $success ? 'Success' : 'Failure';
+$success = false;
 
 /**
  * Validate callback authenticity.
@@ -50,11 +51,55 @@ $transactionStatus = $success ? 'Success' : 'Failure';
  * originated from them. In the case of our example here, this is achieved by
  * way of a shared secret which is used to build and compare a hash.
  */
-$secretKey = $gatewayParams['secretKey'];
-if ($hash != md5($invoiceId . $transactionId . $paymentAmount . $secretKey)) {
-    $transactionStatus = 'Hash Verification Failure';
-    $success = false;
+
+//Lets get our locally saved settings for this order
+
+$invoice = Capsule::table('tblpayzw')
+        ->where('status', 'pending_payment')
+        ->where('invoice_id', $invoiceId)
+        ->orderBy('id', 'DESC')
+        ->first();
+
+logTransaction($gatewayParams['name'], $_POST, $status);
+
+$payzw_id = $invoice->id;
+$transactionId = 'Payzw-' . $payzw_id . '-' . $_POST["paynowreference"];
+
+$ch = curl_init();
+
+  //set the url, number of POST vars, POST data
+  curl_setopt($ch, CURLOPT_URL, $invoice->pollurl);
+  curl_setopt($ch, CURLOPT_POST, 0);
+  curl_setopt($ch, CURLOPT_POSTFIELDS, '');
+  curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+  curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+  //execute post
+  $result = curl_exec($ch);
+
+if ($result) {
+    //close connection
+    curl_close($ch);
+
+    $msg = ParseMsg($result);
+    
+    $secretKey =  $$params['secretKey'];
+    ;
+    $validateHash = CreateHash($msg, $secretKey);
+
+    // TODO
+
+    // if ($validateHash != $msg["hash"]) {
+    //     $success = false;
+    // } else {
+    //     if (!empty($invoice)  && $status === 'Paid') {
+    //         $success = true;
+    //     }
+    // }
 }
+
+
+
 
 /**
  * Validate Callback Invoice ID.
@@ -97,7 +142,7 @@ checkCbTransID($transactionId);
  */
 logTransaction($gatewayParams['name'], $_POST, $status);
 
-//if ($success) {
+if ($_POST['status'] == 'Paid' || $_POST['status'] == 'Awaiting Delivery' || $_POST['status'] == 'Delivered'){
 
     /**
      * Add Invoice Payment.
@@ -117,67 +162,19 @@ logTransaction($gatewayParams['name'], $_POST, $status);
         $gatewayModuleName
     );
 
-//}
-
-
-
-// Ater payment on paypal
-function completePayment() {
-    global $integration_id;
-    global $integration_key;
-    global $checkout_url;
-    global $orders_data_file;
-
-    $request->reference = $_GET['order_id'];
-
-    //Lets get our locally saved settings for this order
-    $orders_array = array();
-    if (file_exists($orders_data_file)) {
-        $orders_array = parse_ini_file($orders_data_file, true);
+      /**
+       * Update the tblpayzw table for this transaction
+       */
+    try {
+        $updatedTblpayzw = Capsule::table('tblpayzw')
+                ->where('invoice_id', $invoiceId)
+                ->update(
+                    [
+                    'status' => 'Paid',
+                    ]
+                );
+    } catch (\Exception $e) {
+        echo "Error while making payment";
+//                {$e->getMessage()};
     }
-
-    $order_data = $orders_array['OrderNo_' . $request->reference];
-
-    $ch = curl_init();
-
-    //set the url, number of POST vars, POST data
-    curl_setopt($ch, CURLOPT_URL, $order_data['pollurl']);
-    curl_setopt($ch, CURLOPT_POST, 0);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, '');
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-
-    //execute post
-    $result = curl_exec($ch);
-
-    if ($result) {
-
-        //close connection
-        $msg = ParseMsg($result);
-
-        $MerchantKey = $integration_key;
-        $validateHash = CreateHash($msg, $MerchantKey);
-
-        if ($validateHash != $msg["hash"]) {
-            header("Location: $checkout_url");
-        } else {
-            /*             * *** IMPORTANT ****
-              On Paynow, payment status has changed, say from Awaiting Delivery to Delivered
-
-              Here is where you
-              1. Update your local shopping cart of Payment Status etc and do appropriate actions here, Save data to DB
-              2. Email, SMS Notifications to customer, merchant etc
-              3. Any other thing
-
-             * ** END OF IMPORTANT *** */
-            //1. Lets write the updated settings
-            $orders_array['OrderNo_' . $request->reference] = $msg;
-            $orders_array['OrderNo_' . $request->reference]['returned_from_paynow'] = 'yes';
-
-            write_ini_file($orders_array, $orders_data_file, true);
-        }
-    }
-
-    //Thank	your customer
-    // getBackFromPaynowHTML();
 }
